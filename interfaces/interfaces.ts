@@ -9,3 +9,8 @@ export interface JournalEntryInput {
   memo?: string;
   lines: JournalLineInput[];
 }
+
+export interface AccountInput {
+  name: string;
+  type: string;
+}
