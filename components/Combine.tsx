@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,6 +14,14 @@ import { Plus, Trash2, CalendarIcon } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { format } from "date-fns"
+import {
+    createAccount,
+    getAllAccounts,
+    updateAccount,
+    deleteAccount,
+} from "@/actions/account_actions"
+import { createJournalEntry } from "@/actions/journal_actions"
+
 
 const ACCOUNT_TYPES = ["Assets", "Liabilities", "Equity", "Revenue", "Expenses"]
 
@@ -39,6 +47,7 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
     // Account Form State
     const [accountName, setAccountName] = useState("")
     const [accountType, setAccountType] = useState("")
+    const [accountOptions, setAccountOptions] = useState<Account[]>([])
 
     // Accounts list (starts with some default accounts)
     const [accounts, setAccounts] = useState<Account[]>([
@@ -48,6 +57,14 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
         { id: "4", name: "Sales Revenue", type: "Revenue" },
         { id: "5", name: "Office Expenses", type: "Expenses" },
     ])
+
+    useEffect(() => {
+        async function fetchAccounts() {
+            const data = await getAllAccounts()
+            setAccountOptions(data)
+        }
+        fetchAccounts()
+    }, [])
 
     // Journal Entry Form State
     const [entryDate, setEntryDate] = useState<Date | undefined>(new Date())
@@ -63,30 +80,34 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
     const isBalanced = totalDebits === totalCredits && totalDebits > 0
 
     // Account Form Functions
-    const handleAccountSubmit = (e: React.FormEvent) => {
+    const handleAccountSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-
-        const newAccount: Account = {
-            id: Date.now().toString(),
-            name: accountName,
-            type: accountType,
-        }
-
-        // Add to local accounts list
-        setAccounts([...accounts, newAccount])
 
         const accountData = { name: accountName, type: accountType }
 
-        if (onAccountSubmit) {
-            onAccountSubmit(accountData)
-        } else {
-            console.log("Account created:", accountData)
-        }
+        try {
+            if (editMode) {
+                await updateAccount(editMode, accountData)
+            } else {
+                await fetch("/api/accounts", {
+                    method: "POST",
+                    body: JSON.stringify(accountData),
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                })
+            }
 
-        // Reset form
-        setAccountName("")
-        setAccountType("")
+            const refreshed = await getAllAccounts()
+            setAccountOptions(refreshed)
+            setAccountName("")
+            setAccountType("")
+            setEditMode(null)
+        } catch {
+            alert("Failed to save account")
+        }
     }
+
 
     // Journal Entry Functions
     const addJournalLine = () => {
@@ -113,7 +134,7 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
         )
     }
 
-    const handleJournalSubmit = (e: React.FormEvent) => {
+    const handleJournalSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
         if (!isBalanced) {
@@ -121,7 +142,9 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
             return
         }
 
-        const validLines = journalLines.filter((line) => line.accountId && (line.debit > 0 || line.credit > 0))
+        const validLines = journalLines.filter(
+            (line) => line.accountId && (line.debit > 0 || line.credit > 0)
+        )
 
         const journalData = {
             date: entryDate,
@@ -129,19 +152,42 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
             lines: validLines,
         }
 
-        if (onJournalSubmit) {
-            onJournalSubmit(journalData)
-        } else {
-            console.log("Journal entry submitted:", journalData)
-        }
+        try {
+            await createJournalEntry(journalData)
 
-        // Reset form
-        setEntryDate(new Date())
-        setMemo("")
-        setJournalLines([
-            { id: "1", accountId: "", debit: 0, credit: 0 },
-            { id: "2", accountId: "", debit: 0, credit: 0 },
-        ])
+            setEntryDate(new Date())
+            setMemo("")
+            setJournalLines([
+                { id: "1", accountId: "", debit: 0, credit: 0 },
+                { id: "2", accountId: "", debit: 0, credit: 0 },
+            ])
+        } catch (error) {
+            console.error("Failed to create journal entry:", error)
+            alert("Failed to save journal entry")
+        }
+    }
+
+
+
+
+    const [editMode, setEditMode] = useState<string | null>(null)
+
+    const handleEdit = (account: any) => {
+        setEditMode(account.id)
+        setAccountName(account.name)
+        setAccountType(account.type)
+    }
+
+
+
+
+    const handleDelete = async (id: string) => {
+        try {
+            await deleteAccount(id)
+            setAccounts((prev) => prev.filter((acc) => acc.id !== id))
+        } catch {
+            alert("Failed to delete")
+        }
     }
 
     return (
@@ -192,7 +238,7 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
                                         </div>
 
                                         <Button type="submit" className="w-full">
-                                            Create Account
+                                            {editMode ? "Update Account" : "Create Account"}
                                         </Button>
                                     </form>
                                 </div>
@@ -201,14 +247,19 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
                                 <div>
                                     <h3 className="text-lg font-semibold mb-4">Existing Accounts</h3>
                                     <div className="space-y-2 max-h-96 overflow-y-auto">
-                                        {accounts.map((account) => (
+                                        {accountOptions.map((account) => (
                                             <div key={account.id} className="flex justify-between items-center p-3 border rounded-lg">
                                                 <div>
                                                     <div className="font-medium">{account.name}</div>
                                                     <div className="text-sm text-muted-foreground">{account.type}</div>
                                                 </div>
+                                                <div className="flex gap-2">
+                                                    <Button size="sm" onClick={() => handleEdit(account)}>Edit</Button>
+                                                    <Button size="sm" variant="destructive" onClick={() => handleDelete(account.id)}>Delete</Button>
+                                                </div>
                                             </div>
                                         ))}
+
                                     </div>
                                 </div>
                             </div>
@@ -293,11 +344,21 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
                                                     min="0"
                                                     value={line.debit || ""}
                                                     onChange={(e) => {
-                                                        updateJournalLine(line.id, "debit", Number.parseFloat(e.target.value) || 0)
-                                                        if (Number.parseFloat(e.target.value) > 0) {
-                                                            updateJournalLine(line.id, "credit", 0)
+                                                        const value = e.target.value
+                                                        const num = Number(value)
+
+                                                        // Allow empty string for typing
+                                                        if (value === "") {
+                                                            updateJournalLine(line.id, "debit", 0)
+                                                            return
+                                                        }
+
+                                                        if (!isNaN(num)) {
+                                                            updateJournalLine(line.id, "debit", num)
+                                                            if (num > 0) updateJournalLine(line.id, "credit", 0)
                                                         }
                                                     }}
+
                                                     placeholder="0.00"
                                                 />
                                             </div>
@@ -309,11 +370,21 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
                                                     min="0"
                                                     value={line.credit || ""}
                                                     onChange={(e) => {
-                                                        updateJournalLine(line.id, "credit", Number.parseFloat(e.target.value) || 0)
-                                                        if (Number.parseFloat(e.target.value) > 0) {
+                                                        const value = e.target.value
+                                                        const num = Number(value)
+
+                                                        // Allow empty string for typing
+                                                        if (value === "") {
                                                             updateJournalLine(line.id, "debit", 0)
+                                                            return
+                                                        }
+
+                                                        if (!isNaN(num)) {
+                                                            updateJournalLine(line.id, "debit", num)
+                                                            if (num > 0) updateJournalLine(line.id, "credit", 0)
                                                         }
                                                     }}
+
                                                     placeholder="0.00"
                                                 />
                                             </div>
@@ -354,6 +425,7 @@ export default function AccountingForm({ onAccountSubmit, onJournalSubmit }: Acc
                                 <Button type="submit" className="w-full" disabled={!isBalanced}>
                                     Create Journal Entry
                                 </Button>
+
                             </form>
                         </TabsContent>
                     </Tabs>

@@ -1,12 +1,12 @@
 "use server";
 
-import prisma from "@/lib/prisma";
+import prisma  from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
-import { AccountInput } from "@/interfaces/interfaces";
+import { AccountInput } from "@/interfaces/interfaces"; // or define directly
 
 export async function createAccount(data: AccountInput) {
-
   try {
+    console.log("Creating Account")
     await prisma.account.create({
       data: {
         name: data.name,
@@ -15,11 +15,14 @@ export async function createAccount(data: AccountInput) {
         updatedAt: new Date(),
       },
     });
+    console.log("Creating Account Done")
     revalidatePath("/accounts");
   } catch (error) {
+    console.error(error);
     throw new Error("Failed to create account");
   }
 }
+
 
 export async function getAllAccounts() {
   try {
